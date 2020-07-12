@@ -1,4 +1,4 @@
-function [lon_lat] = ecef22lla(ECEF,a,e,t,et)
+function [lon_lat] = ecef22lla(ECEF,a,e,t)
 %et=24*60*60;%(s)
 %t=0:600:et;
 % WGS84 ellipsoid constants:
@@ -8,6 +8,7 @@ function [lon_lat] = ecef22lla(ECEF,a,e,t,et)
 %y=8000e7;
 %z=500;
 % calculations:
+lon_lat=zeros(2,length(t));
 for j=1:length(t)
 x=ECEF(1,j);
 y=ECEF(2,j);
@@ -18,8 +19,8 @@ p   = sqrt(x.^2+y.^2);
 th  = atan2(a*z,b*p);
 lon = atan2(y,x);
 lat = atan2((z+ep^2.*b.*sin(th).^3),(p-e^2.*a.*cos(th).^3));
-N   = a./sqrt(1-e^2.*sin(lat).^2);
-alt = p./cos(lat)-N;
+%N  = a./sqrt(1-e^2.*sin(lat).^2);
+%altitud = p./cos(lat)-N;
 
 % return lon in range [0,2*pi)
 %lon = mod(lon,2*pi);

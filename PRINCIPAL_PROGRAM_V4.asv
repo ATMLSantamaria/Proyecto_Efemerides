@@ -1,0 +1,193 @@
+close all
+%clc
+clear
+format longEng
+%%Se invocan las constantes necesarias
+[et,rad2deg,deg2rad,RE] = constantes_y_relaciones();
+
+%%dato intervalo tiempo
+t=1:1:et;%ahora mismo se genera la posicion cada 20 min
+%t=1:600:et;%se pueden elegir distintos intervalos, simplemente tarda mas
+%t=1:1:et; % posicion cada segundo
+%clear et
+
+%%%
+%(latitud, longitud and altitud)
+coordenadas_urgel=[42,1.4,700];
+coordenadas_san_petersburgo=[59.9339,30.3061,3]
+coordenadas_usuario=coordenadas_urgel;
+[ecef_usuario ] = ecef_ruta( coordenadas_usuario );
+clear coordenadas_usuario
+
+angulo_mascara=10;
+tiempo=1;% s momento en el que queremos la posicion de los satelites
+
+%tiempo=7564 % 
+
+
+h = waitbar(0,'POSICIONANDO SATELITES ');
+tic;
+filename='almanac.xlsx';
+
+%FUNCION QUE LEE LOS ALMANACS Y DEVUELVE LOS VALORES DE CADA SATELITE
+%%%
+[ephemeris ] = leer_almanac( filename );
+clear filename
+
+%%CALCULAR ÓRBITAS
+
+%Aqui calculo las coordenadas ECEF de cada satelite.
+[posicion_satelites_ecef,posicion_satelites_latitud_longitud]=posicionar_satelites(t,ephemeris);
+
+%%%
+%  Funcion que genera gráficas
+%%%
+graficas(posicion_satelites_ecef,RE)
+
+%%%
+
+%  Se reduce la matriz de posición de los satélites en todos los instantes de
+%  tiempo, a la matriz de posicion de los satélites en un único instante,
+%  en el que queremos la localizacion
+
+posicion_satelites_ecef_t=squeeze(posicion_satelites_ecef(:,:,tiempo));
+
+
+%% Calculo de visibilidad
+
+%La primera función calcula la visibilidad para un instante concreto
+[ matriz_ang_y_dis,alfa_rad_1t,dis_sat_flat_1t ] = geometria_para_t_concreto(ecef_usuario ,posicion_satelites_ecef_t );
+%matriz_ang_y_dis:contiene angulos en la primera columna y distancias en la
+%segunda columna
+
+%Esta funcionc alcula la visibilidad (en forma de angulos y distancias
+%positivas o negativas, para todos los instantes del tiempo
+[ matriz_ang_y_dis_en_el_tiempo,alfa_rad_para_todo_t,dis_sat_flat_para_todo_t ] = geometria_para_todo_t( ecef_usuario,posicion_satelites_ecef,t );
+% matriz_ang_y_dis_en_el_tiempo: contiene angulos en las filas 1-24 y
+% distancias en las filas 25-48, cada columna es un instante en el tiempo
+
+
+
+%%
+%% Aqui debajo calculo la cantidad de veces que se repite una visibilidad
+%% determinada usando distancia satelite-planotangente y el numero de
+%% veces que se repite usando el ángulo
+
+[numero_de_avistamientos_con_dis,numero_de_avistamientos_con_ang]=rep_de_num_satelites_visibles(dis_sat_flat_para_todo_t,alfa_rad_para_todo_t,rad2deg,angulo_mascara);
+
+%% Grafica que muestra frecuencias de avistamientos
+% Aqui se muestra de forma gráfica la frecuencia de cada número de
+% satélites visibles a lo largo del periodo escogido.
+% Podemos comprobar que el número de satélites visibles más frecuentes
+% es 7
+hold on
+figure(3)
+title('Frecuencias de numero de avistamientos')
+xxx=1:1:24;
+bar(xxx,numero_de_avistamientos_con_ang)
+xlabel('Nº de satélites visibles (\circ)')
+ylabel('Frecuencia (\circ)')
+hold on
+close(h)
+
+%%
+%% Aqui calculo una matriz con las posiciones x,y,z exclusivamente de los
+%% satelites visibles EN UN MOMENTO EN EL TIEMPO usando la distancia
+%% satelite-planotangente y el angulo
+
+[ecef_sat_vis_con_dis,ecef_sat_vis_con_angulo]=crear_matriz_ecef_sat_vis(posicion_satelites_ecef_t,dis_sat_flat_1t,alfa_rad_1t,rad2deg,angulo_mascara);
+%%
+
+%% Calcular para todo t los satelites visibles operacion sin sentido aqui
+%%[ecef_sat_vis_con_angulo_para_todo_t]=crear_matriz_ecef_sat_vis_para_todo_t( matriz_ang_y_dis_en_el_tiempo,alfa_rad_para_todo_t,dis_sat_flat_para_todo_t)
+
+
+%% aqui he conseguido reordenar ECEF_P_T para despues poder seleccionar los
+%% indices visibles
+% ECEF_P_T_ordenada=permute(posicion_satelites_ecef,[1,3,2]);
+% prueba=squeeze(ECEF_P_T_ordenada(:,1,:));
+
+%% Aquí se calcula la el ángulo de elevación de cada satélite y el azimuth de cada satélite
+%[matriz_sat_azimuth,matriz_sat_elevacion]=calcular_el_az(ecef_sat_vis_con_angulo,ecef_usuario);
+
+%% Calcular rango satélites
+[matriz_rango_satelites,ecef_rango]=calcular_rango(ecef_sat_vis_con_angulo,ecef_usuario);
+%%
+%%> ECEF_P_T(vis_all,:);
+
+%% Calcular GDOP
+% [GDOP_matriz,GDOP_tiempo]=calculo_gdop(posicion_satelites_ecef,ecef_usuario,t,RE);
+% 
+% hold on
+% figure(3)
+% plot(t,GDOP_matriz)
+% hold on
+% close(h)
+%% aa
+%function [Gdop,gdop] = calculo_gdop_para_t_determinado(posicion_satelites_ecef,ecef_usuario,t,RE)
+%% Calculo de posicion, dop, minimos cuadrados para todo el subconjunto de
+%  satelites visibles.
+
+umbral_error=8; % metros
+
+%% Sin aplicar error
+% Esta funcion lleva a cabo la generación de las matrices que se usan posteriormente para
+% el calculo de la posicion por mínimos cuadrados y el algoritmo raim.
+% Tiene una funcionalidad necesaria para introducir un error en el
+% pseudorango de uno de los satélites y así comprobar el algoritmo raim. En
+% este caso la funcionalidad se desactiva con false, pero en el siguiente
+% calculo la activamos para comprobar que funciona.
+[G_sin_error,rho_est_sin_error,rho_medido_sin_error] = calculo_de_ecuacion_matricial(ecef_sat_vis_con_angulo,ecef_usuario,false,6);
+% Esta funcion calcula los factores de dilucion de la precision
+[gdop_t_sin_error,pdop_t_sin_error,hdop_t_sin_error,vdop_t_sin_error] = calculo_dop(G_sin_error);
+
+
+%Aqui se calcula el estadístico que se usa para testear si existe algun
+%fallo de integridad o no
+[r_no_error,SSE_no_error] = calculo_ls_raim(rho_est_sin_error,rho_medido_sin_error,G_sin_error,ecef_usuario);
+
+
+%%  Aplicando error
+% Aplico las mismas 
+num_sat = size(ecef_sat_vis_con_angulo,1);
+matriz_de_r=[];
+[G_con_error,rho_est_con_error,rho_medido_con_error]=calculo_de_ecuacion_matricial(ecef_sat_vis_con_angulo,ecef_usuario,true,2);
+[gdop_t_con_error,pdop_t_con_error,hdop_t_con_error,vdop_t_con_error] = calculo_dop(G_con_error);
+[r_con_error,SSE_con_error] = calculo_ls_raim(rho_est_con_error,rho_medido_con_error,G_con_error,ecef_usuario);
+
+%% Fault detection and isolation (FDI)
+[r_matriz_subconjuntos,satelite_en_fallo,solucion_ecef_sat_sin_fallo] = fdi_fde(umbral_error,G_con_error,rho_est_con_error,rho_medido_con_error,ecef_usuario,ecef_sat_vis_con_angulo);
+
+clear tiempo
+
+%% En este bucle final ejecuto toda la serie de funciones para calcular los satélites visibles en todo momento del tiempo, y calcular la serie de valores de los valores dop.
+for tiempo=1:1:length(t)
+    tiempo;
+    posicion_satelites_ecef_t_bucle=squeeze(posicion_satelites_ecef(:,:,tiempo));
+    [ matriz_ang_y_dis,alfa_rad_1t_bucle,dis_sat_flat_1t_bucle ] = geometria_para_t_concreto(ecef_usuario ,posicion_satelites_ecef_t_bucle );
+    [ecef_sat_vis_con_dis,ecef_sat_vis_con_angulo_bucle]=crear_matriz_ecef_sat_vis(posicion_satelites_ecef_t_bucle,dis_sat_flat_1t_bucle,alfa_rad_1t_bucle,rad2deg,angulo_mascara);
+    [matriz_rango_satelites_bucle,ecef_rango_bucle]=calcular_rango(ecef_sat_vis_con_angulo_bucle,ecef_usuario);
+    umbral_error=8; % metros
+    [G_sin_error_en_bucle,rho_est_sin_error_en_bucle,rho_medido_sin_error_en_bucle] = calculo_de_ecuacion_matricial(ecef_sat_vis_con_angulo_bucle,ecef_usuario,false,6);
+    [gdop_t_sin_error,pdop_t_sin_error,hdop_t_sin_error,vdop_t_sin_error] = calculo_dop(G_sin_error_en_bucle);
+    vector_gdop_en_tiempo(tiempo)=gdop_t_sin_error;
+    vector_pdop_en_tiempo(tiempo)=pdop_t_sin_error;
+    vector_hdop_en_tiempo(tiempo)=hdop_t_sin_error;
+    vector_vdop_en_tiempo(tiempo)=vdop_t_sin_error;
+    clear posicion_satelites_ecef_t_bucle
+end
+hold on
+figure(4)
+title('Factores DOP')
+a1=plot(t,vector_gdop_en_tiempo); M1="GDOP";
+hold on
+a2=plot(t,vector_pdop_en_tiempo); M2="PDOP";
+hold on
+a3=plot(t,vector_hdop_en_tiempo); M3="HDOP";
+hold on
+a4=plot(t,vector_vdop_en_tiempo); M4="VDOP";
+hold on
+xlabel('Tiempo en segundos')
+ylabel('Valor del factor DOP')
+legend([a1,a2,a3,a4], [M1, M2,M3,M4]);
+toc;
